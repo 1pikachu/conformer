@@ -48,8 +48,11 @@ def inference(args):
                       input_dim=dim, 
                       encoder_dim=32, 
                       num_encoder_layers=3).to(args.device)
-
     model.eval()
+    if args.device == "xpu":
+        datatype = torch.float16 if args.precision == "float16" else torch.bfloat16 if args.precision == "bfloat16" else torch.float
+        model = torch.xpu.optimize(model=model, dtype=datatype)
+
     if args.channels_last:
         try:
             model = model.to(memory_format=torch.channels_last)
@@ -191,10 +194,6 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = False
 
     with torch.no_grad():
-        model.eval()
-        if args.device == "xpu":
-            datatype = torch.float16 if args.precision == "float16" else torch.bfloat16 if args.precision == "bfloat16" else torch.float
-            model = torch.xpu.optimize(model=model, dtype=datatype)
         if args.precision == "float16" and args.device == "cuda":
             print("---- Use autocast fp16 cuda")
             with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
