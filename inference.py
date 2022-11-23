@@ -61,7 +61,6 @@ def inference(args):
         try:
             model = torch.jit.trace(model, (inputs, input_lengths), check_trace=False, strict=False)
             print("---- JIT trace enable.")
-            model = torch.jit.freeze(model)
         except (RuntimeError, TypeError) as e:
             print("---- JIT trace disable.")
             print("failed to use PyTorch jit mode due to: ", e)
@@ -77,7 +76,10 @@ def inference(args):
     # Forward propagate
     if args.profile and args.device == "xpu":
         for i in range(args.num_iter + args.num_warmup):
+            inputs = torch.rand(batch_size, sequence_length, dim)
+            input_lengths = torch.LongTensor([12345, 12300, 12000])
             elapsed = time.time()
+            inputs = inputs.to(args.device)
             with torch.autograd.profiler_legacy.profile(enabled=args.profile, use_xpu=True, record_shapes=False) as prof:
                 outputs, output_lengths = model(inputs, input_lengths)
             torch.xpu.synchronize()
@@ -110,7 +112,10 @@ def inference(args):
             on_trace_ready=trace_handler,
         ) as p:
             for i in range(args.num_iter + args.num_warmup):
+                inputs = torch.rand(batch_size, sequence_length, dim)
+                input_lengths = torch.LongTensor([12345, 12300, 12000])
                 elapsed = time.time()
+                inputs = inputs.to(args.device)
                 with torch.jit.fuser(fuser_mode):
                     outputs, output_lengths = model(inputs, input_lengths)
                 torch.cuda.synchronize()
@@ -132,7 +137,10 @@ def inference(args):
             on_trace_ready=trace_handler,
         ) as p:
             for i in range(args.num_iter + args.num_warmup):
+                inputs = torch.rand(batch_size, sequence_length, dim)
+                input_lengths = torch.LongTensor([12345, 12300, 12000])
                 elapsed = time.time()
+                inputs = inputs.to(args.device)
                 outputs, output_lengths = model(inputs, input_lengths)
                 elapsed = time.time() - elapsed
                 p.step()
@@ -142,7 +150,10 @@ def inference(args):
                     total_time += elapsed
     elif not args.profile and args.device == "cuda":
         for i in range(args.num_iter + args.num_warmup):
+            inputs = torch.rand(batch_size, sequence_length, dim)
+            input_lengths = torch.LongTensor([12345, 12300, 12000])
             elapsed = time.time()
+            inputs = inputs.to(args.device)
             with torch.jit.fuser(fuser_mode):
                 outputs, output_lengths = model(inputs, input_lengths)
             torch.cuda.synchronize()
@@ -153,7 +164,10 @@ def inference(args):
                 total_time += elapsed
     else:
         for i in range(args.num_iter + args.num_warmup):
+            inputs = torch.rand(batch_size, sequence_length, dim)
+            input_lengths = torch.LongTensor([12345, 12300, 12000])
             elapsed = time.time()
+            inputs = inputs.to(args.device)
             outputs, output_lengths = model(inputs, input_lengths)
             if args.device == "xpu":
                 torch.xpu.synchronize()
@@ -176,7 +190,11 @@ def main():
     elif args.device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = False
 
-    with torch.inference_mode():
+    with torch.no_grad():
+        model.eval()
+        if args.device == "xpu":
+            datatype = torch.float16 if args.precision == "float16" else torch.bfloat16 if args.precision == "bfloat16" else torch.float
+            model = torch.xpu.optimize(model=model, dtype=datatype)
         if args.precision == "float16" and args.device == "cuda":
             print("---- Use autocast fp16 cuda")
             with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
